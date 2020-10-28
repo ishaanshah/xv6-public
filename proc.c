@@ -554,6 +554,43 @@ kill(int pid)
   return -1;
 }
 
+void
+proclist(void)
+{
+  static char *states[] = {
+  [UNUSED]    "unused",
+  [EMBRYO]    "embryo",
+  [SLEEPING]  "sleep ",
+  [RUNNABLE]  "runble",
+  [RUNNING]   "run   ",
+  [ZOMBIE]    "zombie"
+  };
+
+  struct proc *p;
+  char *state;
+
+  cprintf("PID\tPriority\tName\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq3\tq4\n");
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == UNUSED) {
+      continue;
+    }
+
+    if(p->state >= 0 && p->state < NELEM(states) && states[p->state]) {
+      state = states[p->state];
+    } else {
+      state = "???";
+    }
+
+    // Calculate waiting time
+    uint wtime = ticks - p->ctime - p->rtime;
+
+    cprintf("%d\t%d\t\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
+            p->pid, 0, p->name, state, p->rtime, wtime, p->picked, 0, 0, 0, 0, 0, 0);
+
+    cprintf("\n");
+  }
+}
+
 //PAGEBREAK: 36
 // Print a process listing to console.  For debugging.
 // Runs when user types ^P on console.

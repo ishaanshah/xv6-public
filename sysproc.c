@@ -105,3 +105,8 @@ sys_waitx(void)
 
   return waitx(wtime, rtime);
 }
+
+void
+sys_proclist(void) {
+  proclist();
+}
