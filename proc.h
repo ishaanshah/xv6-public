@@ -55,6 +55,7 @@ struct proc {
   int stime;                   // Sleep time of process
   int itime;                   // The time at which process was inserted into a queue
   int picked;                  // Number of time process has been picked
+  int priority;                // Priority of process
 };
 
 // Process memory is laid out contiguously, low addresses first:

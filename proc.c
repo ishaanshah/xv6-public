@@ -208,6 +208,7 @@ fork(void)
   np->parent = curproc;
   *np->tf = *curproc->tf;
   np->itime = ticks;
+  np->priority = 60;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -398,25 +399,37 @@ scheduler(void)
     acquire(&ptable.lock);
 
     struct proc *next_proc = 0;
-    int min_itime = -1;
+    #ifndef DEFAULT
+      int min_priority = -1;
+    #endif
     // Default round robin scheduler
     for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if(p->state == RUNNABLE) {
           next_proc = p;
-          min_itime = p->itime;
+          #ifdef FCFS
+            min_priority = p->itime;
+          #elif PBS
+            min_priority = p->priority;
+          #endif
           break;
         }
     }
 
-    #ifdef FCFS
-    // First Come First Serve scheduler
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-        if (p->state == RUNNABLE && p->itime < min_itime) {
-          next_proc = p;
-          min_itime = p->itime;
-        }
+        #ifdef FCFS
+          // First Come First Serve scheduler
+          if (p->state == RUNNABLE && p->itime < min_priority) {
+            next_proc = p;
+            min_priority = p->itime;
+          }
+        #elif PBS
+          // Priority based scheduler
+          if (p->state == RUNNABLE && p->priority < min_priority) {
+            next_proc = p;
+            min_priority = p->priority;
+          }
+        #endif
     }
-    #endif
 
     // Switch to chosen process.  It is the process's job
     // to release ptable.lock and then reacquire it
@@ -611,10 +624,39 @@ proclist(void)
     uint wtime = ticks - p->ctime - p->rtime;
 
     cprintf("%d\t%d\t\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
-            p->pid, 0, p->name, state, p->rtime, wtime, p->picked, 0, 0, 0, 0, 0, 0);
+            p->pid, p->priority, p->name, state, p->rtime, wtime, p->picked, 0, 0, 0, 0, 0, 0);
 
     cprintf("\n");
   }
+}
+
+int
+set_priority(int new_priority, int pid) {
+  struct proc *p = ptable.proc;
+
+  if (new_priority < 0 || new_priority > 100) {
+    cprintf("Invalid priority\n");
+    return -1;
+  }
+
+  // Acquire table lock
+  acquire(&ptable.lock);
+
+  int old_priority = -1;
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if (p->pid == pid) {
+      old_priority = p->priority;
+      p->priority = new_priority;
+    }
+  }
+
+  // Release table lock
+  release(&ptable.lock);
+
+  if (old_priority < 0) {
+    cprintf("Invalid PID\n");
+  }
+  return old_priority;
 }
 
 //PAGEBREAK: 36
