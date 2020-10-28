@@ -403,11 +403,11 @@ scheduler(void)
     for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if(p->state == RUNNABLE) {
           next_proc = p;
-          min_itime = p->itime; 
+          min_itime = p->itime;
           break;
         }
     }
-    
+
     #ifdef FCFS
     // First Come First Serve scheduler
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
