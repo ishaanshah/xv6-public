@@ -114,8 +114,9 @@ found:
 
   // Set creation time of process
   p->ctime = ticks;
-  // Set runtime of process to 0
+  // Set runtime and sleeptime of process to 0
   p->rtime = 0;
+  p->stime = 0;
 
   return p;
 }
@@ -338,7 +339,7 @@ waitx(int *wtime, int *rtime)
       if(p->state == ZOMBIE){
         // Update time fields
         *rtime = p->rtime;
-        *wtime = p->etime - p->ctime - p->rtime;
+        *wtime = p->etime - p->ctime - p->rtime - p->stime;
 
         // Found one.
         pid = p->pid;
@@ -352,6 +353,7 @@ waitx(int *wtime, int *rtime)
         p->ctime = 0;
         p->etime = 0;
         p->rtime = 0;
+        p->stime = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
