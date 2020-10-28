@@ -112,6 +112,8 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  // Set number of times picked to 0
+  p->picked = 0;
   // Set creation time of process
   p->ctime = ticks;
   // Set runtime and sleeptime of process to 0
@@ -205,6 +207,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->itime = ticks;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -304,6 +307,7 @@ wait(void)
         p->ctime = 0;
         p->etime = 0;
         p->rtime = 0;
+        p->picked = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
@@ -392,26 +396,46 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+    struct proc *next_proc = 0;
+    int min_itime = -1;
+    // Default round robin scheduler
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state == RUNNABLE) {
+          next_proc = p;
+          min_itime = p->itime; 
+          break;
+        }
+    }
+    
+    #ifdef FCFS
+    // First Come First Serve scheduler
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+        if (p->state == RUNNABLE && p->itime < min_itime) {
+          next_proc = p;
+          min_itime = p->itime;
+        }
+    }
+    #endif
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+    // Switch to chosen process.  It is the process's job
+    // to release ptable.lock and then reacquire it
+    // before jumping back to us.
+    if (next_proc) {
+      c->proc = next_proc;
+      switchuvm(next_proc);
+      next_proc->picked++;
+      next_proc->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
+      swtch(&(c->scheduler), next_proc->context);
       switchkvm();
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
-    release(&ptable.lock);
 
+    release(&ptable.lock);
   }
 }
 
@@ -563,7 +587,7 @@ proclist(void)
   [UNUSED]    "unused",
   [EMBRYO]    "embryo",
   [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
+  [RUNNABLE]  "runable",
   [RUNNING]   "run   ",
   [ZOMBIE]    "zombie"
   };
