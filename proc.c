@@ -120,6 +120,15 @@ found:
   p->rtime = 0;
   p->wtime = 0;
 
+  p->itime = ticks;
+  p->priority = 60;
+  p->cur_q = 0;
+  p->wtime = 0;
+  p->rqtime = 0;
+  for (int i = 0; i < 5; i++) {
+    p->q[i] = 0;
+  }
+
   return p;
 }
 
@@ -207,14 +216,6 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
-  np->itime = ticks;
-  np->priority = 60;
-  np->cur_q = 0;
-  np->wtime = 0;
-  np->rqtime = 0;
-  for (int i = 0; i < 5; i++) {
-    np->q[i] = 0;
-  }
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -429,6 +430,7 @@ scheduler(void)
           if (p->state == RUNNABLE && ticks-p->itime > MLIMIT && p->cur_q > 0) {
             p->cur_q--;
             p->itime = ticks;
+            p->rqtime = 0;
           }
         }
       #endif
@@ -594,6 +596,7 @@ sleep(void *chan, struct spinlock *lk)
   if (p->state == RUNNABLE) {
     p->wtime += ticks-p->itime;
   }
+  p->rqtime = 0;
   p->state = SLEEPING;
 
   sched();
@@ -674,7 +677,7 @@ proclist(void)
   char *state;
 
   acquire(&ptable.lock);
-  cprintf("PID\tPriority\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq3\tq4\n");
+  cprintf("PID\tPriority\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq2\tq3\tq4\n");
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED) {
       continue;
@@ -686,7 +689,7 @@ proclist(void)
       state = "???";
     }
 
-    cprintf("%d\t%d\t\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
+    cprintf("%d\t%d\t\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
             p->pid, p->priority, state, p->rtime, ticks-p->itime,
             p->picked, p->cur_q, p->q[0], p->q[1], p->q[2], p->q[3], p->q[4]);
 

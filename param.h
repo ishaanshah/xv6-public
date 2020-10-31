@@ -12,5 +12,5 @@
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
 #define FSSIZE       1000  // size of file system in blocks
 #ifdef MLFQ
-#define MLIMIT       8   // Max number of ticks to wait before promoting
+#define MLIMIT       32   // Max number of ticks to wait before promoting
 #endif
