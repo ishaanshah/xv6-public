@@ -56,6 +56,10 @@ struct proc {
   int itime;                   // The time at which process was inserted into a queue
   int picked;                  // Number of time process has been picked
   int priority;                // Priority of process
+  int wtime;                   // Wait time in current queue
+  int cur_q;                   // Id of current queue
+  int rqtime;                  // Runtime in current queue
+  int q[5];                    // Total wait time in all queues
 };
 
 // Process memory is laid out contiguously, low addresses first:

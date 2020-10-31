@@ -109,12 +109,36 @@ trap(struct trapframe *tf)
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
     exit();
 
-  #ifndef FCFS
+  #if defined(DEFAULT) || defined(PBS)
     // Force process to give up CPU on clock tick.
     // If interrupts were on while locks held, would need to check nlock.
     if(myproc() && myproc()->state == RUNNING &&
        tf->trapno == T_IRQ0+IRQ_TIMER) {
+      #ifdef DEBUG
+      cprintf("yielding %d\n", myproc()->pid);
+      #endif
       yield();
+    }
+  #endif
+
+  #ifdef MLFQ
+    if(myproc() && myproc()->state == RUNNING &&
+       tf->trapno == T_IRQ0+IRQ_TIMER &&
+       myproc()->rqtime >= (1 << myproc()->cur_q)) {
+      // Shift to lower priority queue
+      if (myproc()->cur_q < 4) {
+        myproc()->cur_q++;
+      }
+      myproc()->rqtime = 0;
+      myproc()->itime = ticks;
+      myproc()->q[myproc()->cur_q]++;
+      #ifdef DEBUG
+      cprintf("yielding %d\n", myproc()->pid);
+      #endif
+      yield();
+    } else if(myproc()) {
+      myproc()->rqtime++;
+      myproc()->q[myproc()->cur_q]++;
     }
   #endif
 

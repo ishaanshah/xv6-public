@@ -209,6 +209,12 @@ fork(void)
   *np->tf = *curproc->tf;
   np->itime = ticks;
   np->priority = 60;
+  np->cur_q = 0;
+  np->wtime = 0;
+  np->rqtime = 0;
+  for (int i = 0; i < 5; i++) {
+    np->q[i] = 0;
+  }
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -398,27 +404,66 @@ scheduler(void)
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
 
-    struct proc *next_proc = 0;
-    #ifndef DEFAULT
-      int min_priority = -1;
-    #endif
-    // Default round robin scheduler
-    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-        if(p->state == RUNNABLE) {
-          next_proc = p;
-          #ifdef FCFS
-            min_priority = p->itime;
-          #elif PBS
-            min_priority = p->priority;
-          #endif
-          break;
-        }
-    }
+    #ifdef DEFAULT
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state != RUNNABLE)
+          continue;
 
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-        #ifdef FCFS
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
+    #else
+      #ifdef MLFQ
+        // Promote to better queue if waiting for a long time
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+          if (p->state == RUNNABLE && ticks-p->itime > MLIMIT && p->cur_q > 0) {
+            p->cur_q--;
+            p->itime = ticks;
+          }
+        }
+      #endif
+
+      struct proc *next_proc = 0;
+      int min_priority = -1;
+      for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+          if(p->state == RUNNABLE) {
+            next_proc = p;
+            #ifdef FCFS
+              min_priority = p->itime;
+            #elif PBS
+              min_priority = p->priority;
+            #endif
+            break;
+          }
+      }
+
+      #ifdef MLFQ
+        int min_q = 5;
+        for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+          if (p->state == RUNNABLE && p->cur_q < min_q) {
+            min_q = p->cur_q;
+            min_priority = p->itime+1;
+          }
+        }
+      #elif FCFS
+        int min_q = 0;
+      #endif
+
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        #if defined(FCFS) || defined(MLFQ)
           // First Come First Serve scheduler
-          if (p->state == RUNNABLE && p->itime < min_priority) {
+          if (p->state == RUNNABLE && p->itime < min_priority && p->cur_q == min_q) {
             next_proc = p;
             min_priority = p->itime;
           }
@@ -429,24 +474,29 @@ scheduler(void)
             min_priority = p->priority;
           }
         #endif
-    }
+      }
 
-    // Switch to chosen process.  It is the process's job
-    // to release ptable.lock and then reacquire it
-    // before jumping back to us.
-    if (next_proc) {
-      c->proc = next_proc;
-      switchuvm(next_proc);
-      next_proc->picked++;
-      next_proc->state = RUNNING;
+      // Switch to chosen process. It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      if (next_proc) {
+        #ifdef DEBUG
+          cprintf("Chose %s %d\n", next_proc->name, next_proc->pid);
+        #endif
 
-      swtch(&(c->scheduler), next_proc->context);
-      switchkvm();
+        c->proc = next_proc;
+        switchuvm(next_proc);
+        next_proc->picked++;
+        next_proc->state = RUNNING;
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
+        swtch(&(c->scheduler), next_proc->context);
+        switchkvm();
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
+    #endif
 
     release(&ptable.lock);
   }
@@ -484,6 +534,9 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  #ifdef MLFQ
+    myproc()->itime = ticks;
+  #endif
   sched();
   release(&ptable.lock);
 }
@@ -556,9 +609,14 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
+      #ifdef MLFQ
+        p->itime = ticks;
+      #endif
+    }
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -583,8 +641,12 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING) {
         p->state = RUNNABLE;
+        #ifdef MLFQ
+          p->itime = ticks;
+        #endif
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -608,7 +670,7 @@ proclist(void)
   struct proc *p;
   char *state;
 
-  cprintf("PID\tPriority\tName\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq3\tq4\n");
+  cprintf("PID\tPriority\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq3\tq4\n");
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED) {
       continue;
@@ -621,10 +683,16 @@ proclist(void)
     }
 
     // Calculate waiting time
-    uint wtime = ticks - p->ctime - p->rtime;
+    uint wtime;
+    #ifdef MLFQ
+      wtime = ticks - p->itime;
+    #else
+      wtime = ticks - p->ctime - p->rtime;
+    #endif
 
-    cprintf("%d\t%d\t\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
-            p->pid, p->priority, p->name, state, p->rtime, wtime, p->picked, 0, 0, 0, 0, 0, 0);
+    cprintf("%d\t%d\t\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
+            p->pid, p->priority, state, p->rtime, wtime,
+            p->picked, p->cur_q, p->q[0], p->q[1], p->q[2], p->q[3], p->q[4]);
 
     cprintf("\n");
   }
@@ -655,6 +723,10 @@ set_priority(int new_priority, int pid) {
 
   if (old_priority < 0) {
     cprintf("Invalid PID\n");
+  }
+
+  if (old_priority >= 0 && new_priority > old_priority) {
+    yield();
   }
   return old_priority;
 }
