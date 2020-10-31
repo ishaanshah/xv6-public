@@ -50,7 +50,6 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   int ctime;                   // Creation time of process
-  int etime;                   // End time of process
   int rtime;                   // Run time of process
   int itime;                   // The time at which process was inserted into a queue
   int picked;                  // Number of time process has been picked

@@ -279,7 +279,6 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
-  curproc->etime = ticks;
   sched();
   panic("zombie exit");
 }
@@ -312,7 +311,6 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         p->ctime = 0;
-        p->etime = 0;
         p->rtime = 0;
         p->picked = 0;
         p->state = UNUSED;
@@ -362,7 +360,6 @@ waitx(int *wtime, int *rtime)
         p->name[0] = 0;
         p->killed = 0;
         p->ctime = 0;
-        p->etime = 0;
         p->rtime = 0;
         p->wtime = 0;
         p->state = UNUSED;
