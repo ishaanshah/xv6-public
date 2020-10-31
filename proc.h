@@ -52,7 +52,6 @@ struct proc {
   int ctime;                   // Creation time of process
   int etime;                   // End time of process
   int rtime;                   // Run time of process
-  int stime;                   // Sleep time of process
   int itime;                   // The time at which process was inserted into a queue
   int picked;                  // Number of time process has been picked
   int priority;                // Priority of process

@@ -118,7 +118,7 @@ found:
   p->ctime = ticks;
   // Set runtime and sleeptime of process to 0
   p->rtime = 0;
-  p->stime = 0;
+  p->wtime = 0;
 
   return p;
 }
@@ -350,7 +350,7 @@ waitx(int *wtime, int *rtime)
       if(p->state == ZOMBIE){
         // Update time fields
         *rtime = p->rtime;
-        *wtime = p->etime - p->ctime - p->rtime - p->stime;
+        *wtime = p->wtime;
 
         // Found one.
         pid = p->pid;
@@ -364,7 +364,7 @@ waitx(int *wtime, int *rtime)
         p->ctime = 0;
         p->etime = 0;
         p->rtime = 0;
-        p->stime = 0;
+        p->wtime = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
@@ -414,6 +414,8 @@ scheduler(void)
         // before jumping back to us.
         c->proc = p;
         switchuvm(p);
+        p->wtime += ticks-p->itime;
+        p->picked++;
         p->state = RUNNING;
 
         swtch(&(c->scheduler), p->context);
@@ -439,8 +441,10 @@ scheduler(void)
       for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
           if(p->state == RUNNABLE) {
             next_proc = p;
-            #ifdef FCFS
+            #ifdef MLFQ
               min_priority = p->itime;
+            #elif FCFS
+              min_priority = p->ctime;
             #elif PBS
               min_priority = p->priority;
             #endif
@@ -456,19 +460,23 @@ scheduler(void)
             min_priority = p->itime+1;
           }
         }
-      #elif FCFS
-        int min_q = 0;
       #endif
 
       for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-        #if defined(FCFS) || defined(MLFQ)
-          // First Come First Serve scheduler
+        #ifdef MLFQ
+          // Multi Level Feedback Queue Scheduler
           if (p->state == RUNNABLE && p->itime < min_priority && p->cur_q == min_q) {
             next_proc = p;
             min_priority = p->itime;
           }
+        #elif FCFS
+          // First Come First Serve Scheduler
+          if (p->state == RUNNABLE && p->ctime < min_priority) {
+            next_proc = p;
+            min_priority = p->ctime;
+          }
         #elif PBS
-          // Priority based scheduler
+          // Priority Based Scheduler
           if (p->state == RUNNABLE && p->priority < min_priority) {
             next_proc = p;
             min_priority = p->priority;
@@ -486,6 +494,7 @@ scheduler(void)
 
         c->proc = next_proc;
         switchuvm(next_proc);
+        next_proc->wtime += ticks-next_proc->itime;
         next_proc->picked++;
         next_proc->state = RUNNING;
 
@@ -534,9 +543,7 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
-  #ifdef MLFQ
-    myproc()->itime = ticks;
-  #endif
+  myproc()->itime = ticks;
   sched();
   release(&ptable.lock);
 }
@@ -587,6 +594,9 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
+  if (p->state == RUNNABLE) {
+    p->wtime += ticks-p->itime;
+  }
   p->state = SLEEPING;
 
   sched();
@@ -612,9 +622,7 @@ wakeup1(void *chan)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
     if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
-      #ifdef MLFQ
-        p->itime = ticks;
-      #endif
+      p->itime = ticks;
     }
   }
 }
@@ -643,9 +651,7 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING) {
         p->state = RUNNABLE;
-        #ifdef MLFQ
-          p->itime = ticks;
-        #endif
+        p->itime = ticks;
       }
       release(&ptable.lock);
       return 0;
@@ -670,6 +676,7 @@ proclist(void)
   struct proc *p;
   char *state;
 
+  acquire(&ptable.lock);
   cprintf("PID\tPriority\tState\tr_time\tw_time\tn_run\tcur_q\tq0\tq1\tq3\tq4\n");
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED) {
@@ -682,20 +689,13 @@ proclist(void)
       state = "???";
     }
 
-    // Calculate waiting time
-    uint wtime;
-    #ifdef MLFQ
-      wtime = ticks - p->itime;
-    #else
-      wtime = ticks - p->ctime - p->rtime;
-    #endif
-
     cprintf("%d\t%d\t\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
-            p->pid, p->priority, state, p->rtime, wtime,
+            p->pid, p->priority, state, p->rtime, ticks-p->itime,
             p->picked, p->cur_q, p->q[0], p->q[1], p->q[2], p->q[3], p->q[4]);
 
     cprintf("\n");
   }
+  release(&ptable.lock);
 }
 
 int
